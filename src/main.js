@@ -29,9 +29,6 @@ const state = {
   finishAfterPlace: false,
   deck: [],
   lanes: [{}, {}, {}],
-  queue: [],
-  chooser: null,
-  holding: false,
   pop: null,
   unlockId: null,
   toast: "",
@@ -40,7 +37,6 @@ const state = {
 };
 
 const wrongTimers = [0, 0, 0];
-let handoffTimer = 0;
 let fxTimer = 0;
 let storyTimer = 0;
 let clockTimer = 0;
@@ -116,8 +112,6 @@ function clearTimers() {
     window.clearTimeout(timer);
     wrongTimers[index] = 0;
   });
-  window.clearTimeout(handoffTimer);
-  handoffTimer = 0;
   window.clearTimeout(fxTimer);
   fxTimer = 0;
   window.clearTimeout(storyTimer);
@@ -142,23 +136,22 @@ function startClock() {
   }, 1000);
 }
 
+function lanesPicking() {
+  return state.lanes.some((lane) => lane.status === "pick");
+}
+
 function onTimeUp() {
   if (state.phase !== "play") return;
   window.clearInterval(clockTimer);
   clockTimer = 0;
   state.secondsLeft = 0;
-  if (state.chooser != null) {
-    state.finishAfterPlace = true;
-    return;
-  }
+  state.finishAfterPlace = true;
+  if (lanesPicking()) return;
   enterResult();
 }
 
 function enterResult() {
   state.phase = "result";
-  state.queue = [];
-  state.chooser = null;
-  state.holding = false;
   state.finishAfterPlace = false;
   playTone("win");
   render();
@@ -200,9 +193,6 @@ function startGame(mapIndex = 0) {
   state.phase = "play";
   state.steps = emptySteps(currentMap().facilities);
   state.deck = [];
-  state.queue = [];
-  state.chooser = null;
-  state.holding = false;
   state.pop = null;
   state.unlockId = null;
   state.toast = "";
@@ -215,21 +205,13 @@ function startGame(mapIndex = 0) {
   startClock();
 }
 
-function promoteChooser() {
-  if (state.chooser != null || state.holding || state.phase !== "play") return;
-  if (state.queue.length === 0) return;
-  state.chooser = state.queue[0];
-}
-
 function onAnswer(laneIndex, choice) {
   const lane = state.lanes[laneIndex];
-  if (state.phase !== "play" || !lane || lane.status !== "ask") return;
+  if (state.phase !== "play" || state.finishAfterPlace || !lane || lane.status !== "ask") return;
   if (choice === lane.question.answer) {
-    lane.status = "queued";
+    lane.status = "pick";
     lane.hint = "";
-    state.queue.push(laneIndex);
     playTone("ok");
-    promoteChooser();
     render();
     return;
   }
@@ -247,9 +229,9 @@ function onAnswer(laneIndex, choice) {
   }, 2000);
 }
 
-function onPlace(facilityId) {
-  if (state.chooser == null || state.phase !== "play" || !canBuild(facilityId)) return;
-  const laneIndex = state.chooser;
+function onPlace(laneIndex, facilityId) {
+  const lane = state.lanes[laneIndex];
+  if (state.phase !== "play" || !lane || lane.status !== "pick" || !canBuild(facilityId)) return;
   const before = openFacilityIds(currentMap().facilities, state.steps);
   state.steps[facilityId] = (state.steps[facilityId] ?? 0) + 1;
   const step = state.steps[facilityId];
@@ -263,9 +245,6 @@ function onPlace(facilityId) {
     ? openFacilityIds(currentMap().facilities, state.steps).filter((id) => !before.includes(id))
     : [];
   state.unlockId = newly[0] ?? null;
-  state.queue.shift();
-  state.chooser = null;
-  state.holding = true;
   const won = isMapComplete(currentMap().facilities, state.steps);
   if (won) state.lanes[laneIndex].status = "done";
   else deal(laneIndex);
@@ -273,7 +252,6 @@ function onPlace(facilityId) {
     window.clearInterval(clockTimer);
     state.phase = "story";
     state.storyBeat = 1;
-    state.queue = [];
     state.finishAfterPlace = false;
     playTone("win");
     window.clearTimeout(storyTimer);
@@ -281,18 +259,13 @@ function onPlace(facilityId) {
       state.storyBeat = 2;
       render();
     }, 900);
-  } else if (state.finishAfterPlace) {
-    enterResult();
-    return;
   } else if (state.unlockId) playTone("unlock");
   else playTone("place");
+  if (!won && state.finishAfterPlace && !lanesPicking()) {
+    enterResult();
+    return;
+  }
   render();
-  window.clearTimeout(handoffTimer);
-  handoffTimer = window.setTimeout(() => {
-    state.holding = false;
-    if (state.phase === "play") promoteChooser();
-    render();
-  }, won ? 400 : 650);
   window.clearTimeout(fxTimer);
   fxTimer = window.setTimeout(() => {
     state.pop = null;
@@ -419,7 +392,6 @@ function renderScene() {
       : null,
     h("div", { class: "scene-fit" }, h("div", { class: "plot-sizer" }, h("div", { class: "plot board" }, renderBoard()))),
     state.phase === "story" || state.phase === "result" ? renderFinale() : null,
-    state.chooser != null ? renderChooser() : null,
   );
 }
 
@@ -495,45 +467,6 @@ function facilityArt(art, stage = "done") {
   );
 }
 
-function renderChooser() {
-  const laneIndex = state.chooser;
-  const kid = KIDS[laneIndex];
-  const waiting = state.queue.slice(1).map((index) => KIDS[index].label);
-  return h(
-    "div",
-    { class: "chooser-back" },
-    h(
-      "div",
-      { class: "chooser", role: "dialog", "aria-label": `${kid.label}選擇建造方向` },
-      h("p", { class: "chooser-title", text: `${kid.label} 答對了！要建哪一件？` }),
-      h(
-        "div",
-        { class: "chooser-grid" },
-        currentMap().facilities.map((item, index) => {
-          const open = isFacilityOpen(index, doneFacilities());
-          const step = stepOf(item.id);
-          const enabled = open && step < BUILD_STEPS;
-          const note = chipMark(step, open);
-          return h(
-            "button",
-            {
-              type: "button",
-              class: `place-btn art-btn${enabled ? "" : " is-locked"}`,
-              "data-action": "place",
-              "data-facility": item.id,
-              disabled: enabled ? null : true,
-            },
-            facilityArt(item.art, stageOf(step)),
-            h("span", { class: "place-name", text: item.name }),
-            h("span", { class: "place-note", text: note }),
-          );
-        }),
-      ),
-      waiting.length ? h("p", { class: "chooser-queue", text: `接著排隊：${waiting.join("、")}` }) : null,
-    ),
-  );
-}
-
 function renderFinale() {
   const map = currentMap();
   const last = state.mapIndex >= MAPS.length - 1;
@@ -580,7 +513,7 @@ function renderReady() {
         "ol",
         {},
         h("li", { text: "下面分成三格，每人做自己的題。" }),
-      h("li", { text: "答對後，由你選一件設備建上去。" }),
+      h("li", { text: "答對後，在自己這一格選要建的設備。" }),
       h("li", { text: "第 1 關是長度。建成後可以去第 2 關時間。" }),
       ),
     ),
@@ -598,8 +531,6 @@ function renderLanes() {
 
 function renderLane(index, kid) {
   const lane = state.lanes[index] ?? {};
-  const active = state.chooser === index;
-  const queuedAt = state.queue.indexOf(index);
   if (state.phase === "story" || state.phase === "result") {
     return h(
       "article",
@@ -616,7 +547,7 @@ function renderLane(index, kid) {
   return h(
     "article",
     {
-      class: `lane${active ? " is-active" : ""}${lane.status === "wrong" ? " is-wrong" : ""}`,
+      class: `lane${lane.status === "pick" ? " is-active" : ""}${lane.status === "wrong" ? " is-wrong" : ""}`,
       "data-lane-panel": String(index),
     },
     h(
@@ -628,7 +559,11 @@ function renderLane(index, kid) {
         ? h("span", { class: "type-badge", text: lane.question.typeLabel })
         : null,
     ),
-    lane.status === "ask" ? renderAsk(index, lane) : renderLaneStatus(index, lane, queuedAt),
+    lane.status === "ask"
+      ? renderAsk(index, lane)
+      : lane.status === "pick"
+        ? renderLanePick(index)
+        : renderLaneStatus(index, lane),
   );
 }
 
@@ -651,27 +586,37 @@ function renderAsk(index, lane) {
   ];
 }
 
-function renderLaneStatus(index, lane, queuedAt) {
-  if (lane.status === "wrong") {
-    return h(
-      "div",
-      { class: "lane-note bad", role: "status" },
-      h("p", { class: "note-title", text: "再想一想，即將換下一題" }),
-      h("p", { class: "note-hint", text: lane.hint }),
-    );
-  }
-  const title = state.chooser === index ? "答對了！請在上面選設備" : "答對了，排隊等選位置";
-  const detail =
-    state.chooser === index
-        ? "點選還沒建成的設備。"
-      : queuedAt > 0
-        ? `前面還有 ${queuedAt} 人`
-        : "等積木放好就輪到你";
+function renderLanePick(index) {
   return h(
     "div",
-    { class: `lane-note ${state.chooser === index ? "good" : "wait"}`, role: "status" },
-    h("p", { class: "note-title", text: title }),
-    h("p", { text: detail }),
+    { class: "lane-picks", role: "group", "aria-label": `${KIDS[index].label}選設備` },
+    currentMap().facilities.map((item, facilityIndex) => {
+      const open = isFacilityOpen(facilityIndex, doneFacilities());
+      const step = stepOf(item.id);
+      const enabled = open && step < BUILD_STEPS;
+      return h(
+        "button",
+        {
+          type: "button",
+          class: `lane-pick${enabled ? "" : " is-locked"}`,
+          "data-action": "place",
+          "data-lane": String(index),
+          "data-facility": item.id,
+          disabled: enabled ? null : true,
+        },
+        h("span", { class: "place-name", text: item.name }),
+        h("span", { class: "place-note", text: chipMark(step, open) }),
+      );
+    }),
+  );
+}
+
+function renderLaneStatus(index, lane) {
+  return h(
+    "div",
+    { class: "lane-note bad", role: "status" },
+    h("p", { class: "note-title", text: "再想一想，即將換下一題" }),
+    h("p", { class: "note-hint", text: lane.hint }),
   );
 }
 
@@ -726,7 +671,7 @@ app.addEventListener("click", (event) => {
     return;
   }
   if (action === "place") {
-    onPlace(button.dataset.facility);
+    onPlace(Number(button.dataset.lane), button.dataset.facility);
     return;
   }
   if (button.hasAttribute("data-lane") && button.hasAttribute("data-choice")) {
