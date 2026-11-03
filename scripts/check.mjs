@@ -1,6 +1,16 @@
 import { QUESTIONS, UNIT_CHOICES } from "../src/questions.js";
 import { TIME_QUESTIONS } from "../src/time-questions.js";
-import { MAPS, isFacilityOpen, isMapComplete, openFacilityIds } from "../src/rules.js";
+import {
+  BUILD_STEPS,
+  MAPS,
+  completedCount,
+  emptySteps,
+  isFacilityOpen,
+  isMapComplete,
+  openFacilityIds,
+  stageOf,
+  starCount,
+} from "../src/rules.js";
 
 const G_ANSWERS = {
   G01: "厘米（cm）",
@@ -206,18 +216,30 @@ for (const map of MAPS) {
   }
   if (!isFacilityOpen(2, 1)) fail(`${map.title} 建成 1 項後應打開第 3 項`);
 
+  if (stageOf(0) !== "empty" || stageOf(3) !== "building" || stageOf(BUILD_STEPS) !== "done") {
+    fail("設備應只有未起、起緊、完成三個畫面");
+  }
+  const partial = emptySteps(map.facilities);
+  partial[map.facilities[0].id] = BUILD_STEPS;
+  partial[map.facilities[1].id] = BUILD_STEPS - 1;
+  if (starCount(completedCount(map.facilities, partial)) !== 1) {
+    fail(`${map.title} 未建滿 5 步不應計星`);
+  }
+
   function play(pick) {
-    const built = new Set();
-    for (let step = 0; step < 20 && !isMapComplete(map.facilities, built); step += 1) {
-      const options = map.facilities.filter((item, index) => isFacilityOpen(index, built.size) && !built.has(item.id));
+    const steps = emptySteps(map.facilities);
+    for (let n = 0; n < 40 && !isMapComplete(map.facilities, steps); n += 1) {
+      const options = map.facilities.filter((item) => openFacilityIds(map.facilities, steps).includes(item.id));
       if (options.length === 0) {
         fail(`${map.title} 建造卡住`);
         return;
       }
-      built.add(pick(options).id);
+      const id = pick(options).id;
+      steps[id] += 1;
     }
-    if (!isMapComplete(map.facilities, built)) fail(`${map.title} 未能完工`);
-    if (openFacilityIds(map.facilities, built).length !== 0) fail(`${map.title} 完工後仍有空位`);
+    if (!isMapComplete(map.facilities, steps)) fail(`${map.title} 未能完工`);
+    if (openFacilityIds(map.facilities, steps).length !== 0) fail(`${map.title} 完工後仍有空位`);
+    if (starCount(completedCount(map.facilities, steps)) !== 5) fail(`${map.title} 六件完成應顯示 5 星`);
   }
   play((options) => options[0]);
   play((options) => options[options.length - 1]);

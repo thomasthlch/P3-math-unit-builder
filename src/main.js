@@ -1,7 +1,19 @@
 import "./style.css";
 import { QUESTIONS } from "./questions.js";
 import { TIME_QUESTIONS } from "./time-questions.js";
-import { MAPS, isFacilityOpen, isMapComplete, openFacilityIds } from "./rules.js";
+import {
+  BUILD_STEPS,
+  MAPS,
+  completedCount,
+  emptySteps,
+  isFacilityOpen,
+  isMapComplete,
+  openFacilityIds,
+  stageOf,
+  starCount,
+} from "./rules.js";
+
+const ROUND_SECONDS = 60;
 
 const KIDS = [
   { label: "1 號", tint: "#ff5a5a" },
@@ -12,7 +24,9 @@ const KIDS = [
 const state = {
   phase: "ready",
   mapIndex: 0,
-  built: new Set(),
+  steps: {},
+  secondsLeft: ROUND_SECONDS,
+  finishAfterPlace: false,
   deck: [],
   lanes: [{}, {}, {}],
   queue: [],
@@ -29,6 +43,7 @@ const wrongTimers = [0, 0, 0];
 let handoffTimer = 0;
 let fxTimer = 0;
 let storyTimer = 0;
+let clockTimer = 0;
 let audioCtx = null;
 let fitObserver = null;
 
@@ -76,11 +91,24 @@ function facilityById(id) {
 }
 
 function canBuild(id) {
-  return openFacilityIds(currentMap().facilities, state.built).includes(id);
+  return openFacilityIds(currentMap().facilities, state.steps).includes(id);
 }
 
-function builtCount() {
-  return state.built.size;
+function doneFacilities() {
+  return completedCount(currentMap().facilities, state.steps);
+}
+
+function starsNow() {
+  return starCount(doneFacilities());
+}
+
+function starGlyphs(count) {
+  return `${"★".repeat(count)}${"☆".repeat(5 - count)}`;
+}
+
+function formatTime(seconds) {
+  const safe = Math.max(0, seconds);
+  return `${Math.floor(safe / 60)}:${String(safe % 60).padStart(2, "0")}`;
 }
 
 function clearTimers() {
@@ -94,6 +122,46 @@ function clearTimers() {
   fxTimer = 0;
   window.clearTimeout(storyTimer);
   storyTimer = 0;
+  window.clearInterval(clockTimer);
+  clockTimer = 0;
+}
+
+function startClock() {
+  window.clearInterval(clockTimer);
+  state.secondsLeft = ROUND_SECONDS;
+  state.finishAfterPlace = false;
+  clockTimer = window.setInterval(() => {
+    if (state.phase !== "play") return;
+    state.secondsLeft -= 1;
+    const node = document.querySelector("[data-timer]");
+    if (node) {
+      node.textContent = formatTime(state.secondsLeft);
+      node.classList.toggle("is-urgent", state.secondsLeft <= 10);
+    }
+    if (state.secondsLeft <= 0) onTimeUp();
+  }, 1000);
+}
+
+function onTimeUp() {
+  if (state.phase !== "play") return;
+  window.clearInterval(clockTimer);
+  clockTimer = 0;
+  state.secondsLeft = 0;
+  if (state.chooser != null) {
+    state.finishAfterPlace = true;
+    return;
+  }
+  enterResult();
+}
+
+function enterResult() {
+  state.phase = "result";
+  state.queue = [];
+  state.chooser = null;
+  state.holding = false;
+  state.finishAfterPlace = false;
+  playTone("win");
+  render();
 }
 
 function refill(exclude) {
@@ -130,7 +198,7 @@ function startGame(mapIndex = 0) {
   clearTimers();
   state.mapIndex = mapIndex;
   state.phase = "play";
-  state.built = new Set();
+  state.steps = emptySteps(currentMap().facilities);
   state.deck = [];
   state.queue = [];
   state.chooser = null;
@@ -139,9 +207,12 @@ function startGame(mapIndex = 0) {
   state.unlockId = null;
   state.toast = "";
   state.storyBeat = 0;
+  state.finishAfterPlace = false;
+  state.secondsLeft = ROUND_SECONDS;
   state.lanes = [{}, {}, {}];
   for (let index = 0; index < KIDS.length; index += 1) deal(index);
   render();
+  startClock();
 }
 
 function promoteChooser() {
@@ -179,29 +250,40 @@ function onAnswer(laneIndex, choice) {
 function onPlace(facilityId) {
   if (state.chooser == null || state.phase !== "play" || !canBuild(facilityId)) return;
   const laneIndex = state.chooser;
-  const before = openFacilityIds(currentMap().facilities, state.built);
-  state.built.add(facilityId);
+  const before = openFacilityIds(currentMap().facilities, state.steps);
+  state.steps[facilityId] = (state.steps[facilityId] ?? 0) + 1;
+  const step = state.steps[facilityId];
   state.pop = facilityId;
   const facility = facilityById(facilityId);
-  state.toast = `${KIDS[laneIndex].label} 建好了${facility.name}！`;
-  const newly = openFacilityIds(currentMap().facilities, state.built).filter((id) => !before.includes(id));
+  const finishedPiece = step >= BUILD_STEPS;
+  state.toast = finishedPiece
+    ? `${KIDS[laneIndex].label} 完成${facility.name}！`
+    : `${KIDS[laneIndex].label} 起緊${facility.name} ${step}/5`;
+  const newly = finishedPiece
+    ? openFacilityIds(currentMap().facilities, state.steps).filter((id) => !before.includes(id))
+    : [];
   state.unlockId = newly[0] ?? null;
   state.queue.shift();
   state.chooser = null;
   state.holding = true;
-  const won = isMapComplete(currentMap().facilities, state.built);
+  const won = isMapComplete(currentMap().facilities, state.steps);
   if (won) state.lanes[laneIndex].status = "done";
   else deal(laneIndex);
   if (won) {
+    window.clearInterval(clockTimer);
     state.phase = "story";
     state.storyBeat = 1;
     state.queue = [];
+    state.finishAfterPlace = false;
     playTone("win");
     window.clearTimeout(storyTimer);
     storyTimer = window.setTimeout(() => {
       state.storyBeat = 2;
       render();
     }, 900);
+  } else if (state.finishAfterPlace) {
+    enterResult();
+    return;
   } else if (state.unlockId) playTone("unlock");
   else playTone("place");
   render();
@@ -289,7 +371,12 @@ function renderHeader() {
         h("div", { class: "brand-sub", text: `第 ${currentMap().level} 關 · ${currentMap().title}` }),
       ),
     ),
-    h("div", { class: "progress-pill", text: `設備 ${builtCount()}/${currentMap().facilities.length}` }),
+    h("div", {
+      class: `timer${state.secondsLeft <= 10 ? " is-urgent" : ""}`,
+      "data-timer": "1",
+      text: formatTime(state.secondsLeft),
+    }),
+    h("div", { class: "progress-pill", text: `${starGlyphs(starsNow())} ${starsNow()}/5` }),
     h(
       "div",
       { class: "tools" },
@@ -331,50 +418,77 @@ function renderScene() {
       ? h("div", { class: "unlock-banner", text: `解鎖設備：${facilityById(state.unlockId).name}！` })
       : null,
     h("div", { class: "scene-fit" }, h("div", { class: "plot-sizer" }, h("div", { class: "plot board" }, renderBoard()))),
-    state.phase === "story" ? renderStory() : null,
+    state.phase === "story" || state.phase === "result" ? renderFinale() : null,
     state.chooser != null ? renderChooser() : null,
   );
 }
 
+function stepOf(id) {
+  return state.steps[id] ?? 0;
+}
+
+function chipMark(step, open) {
+  if (step >= BUILD_STEPS) return "完成";
+  if (!open) return "未開";
+  if (step === 0) return "未起";
+  return `起緊 ${step}/5`;
+}
+
 function renderChecklist() {
   const facilities = currentMap().facilities;
+  const totalSteps = facilities.reduce((sum, item) => sum + stepOf(item.id), 0);
+  const maxSteps = facilities.length * BUILD_STEPS;
+  const done = doneFacilities();
   return h(
     "div",
     { class: "checklist", "aria-label": "設備進度" },
-    h("div", {
-      class: "meter",
-      "aria-hidden": "true",
-    }, h("span", { style: `width:${Math.round((builtCount() / facilities.length) * 100)}%` })),
+    h("div", { class: "meter", "aria-hidden": "true" }, h("span", { style: `width:${Math.round((totalSteps / maxSteps) * 100)}%` })),
     ...facilities.map((item, index) => {
-      const open = isFacilityOpen(index, builtCount());
-      const done = state.built.has(item.id);
-      const mark = done ? "完成" : open ? "可建" : "未開";
-      return h("span", { class: `chip${done ? " is-done" : ""}${open ? "" : " is-locked"}`, text: `${item.name} ${mark}` });
+      const open = isFacilityOpen(index, done);
+      const step = stepOf(item.id);
+      const stage = stageOf(step);
+      return h("span", {
+        class: `chip stage-${stage}${open || stage === "done" ? "" : " is-locked"}`,
+        text: `${item.name} ${chipMark(step, open)}`,
+      });
     }),
   );
 }
 
 function renderBoard() {
+  const done = doneFacilities();
   return currentMap().facilities.map((item, index) => {
-    const open = isFacilityOpen(index, builtCount());
-    const done = state.built.has(item.id);
-    const fresh = done && state.pop === item.id;
+    const open = isFacilityOpen(index, done);
+    const step = stepOf(item.id);
+    const stage = stageOf(step);
+    const fresh = state.pop === item.id;
     return h(
       "div",
       {
-        class: `slot${item.wide ? " wide" : ""}${done ? " is-built" : ""}${open ? " is-open" : " is-locked"}${fresh ? " is-new" : ""}`,
+        class: `slot${item.wide ? " wide" : ""} stage-${stage}${open || stage === "done" ? " is-open" : " is-locked"}${fresh ? " is-new" : ""}`,
         style: `left:${item.x}%;top:${item.y}%`,
       },
-      done ? facilityArt(item.art) : h("div", { class: "pad", text: open ? "可建" : "未開" }),
-      h("div", { class: "slot-name", text: item.name }),
+      stage === "empty"
+        ? h("div", { class: "pad", text: open ? "未起" : "未開" })
+        : facilityArt(item.art, stage),
+      renderPips(step),
+      h("div", { class: "slot-name", text: `${item.name} ${chipMark(step, open)}` }),
     );
   });
 }
 
-function facilityArt(art) {
+function renderPips(step) {
+  return h(
+    "span",
+    { class: "pips", "aria-hidden": "true" },
+    Array.from({ length: BUILD_STEPS }, (_, index) => h("i", { class: index < step ? "on" : "" })),
+  );
+}
+
+function facilityArt(art, stage = "done") {
   return h(
     "div",
-    { class: `art art-${art}`, "aria-hidden": "true" },
+    { class: `art art-${art} is-${stage}`, "aria-hidden": "true" },
     h("i"),
     h("i"),
     h("i"),
@@ -396,10 +510,10 @@ function renderChooser() {
         "div",
         { class: "chooser-grid" },
         currentMap().facilities.map((item, index) => {
-          const open = isFacilityOpen(index, builtCount());
-          const done = state.built.has(item.id);
-          const enabled = open && !done;
-          const note = done ? "已建成" : open ? "可建" : "未開";
+          const open = isFacilityOpen(index, doneFacilities());
+          const step = stepOf(item.id);
+          const enabled = open && step < BUILD_STEPS;
+          const note = chipMark(step, open);
           return h(
             "button",
             {
@@ -409,7 +523,7 @@ function renderChooser() {
               "data-facility": item.id,
               disabled: enabled ? null : true,
             },
-            facilityArt(item.art),
+            facilityArt(item.art, stageOf(step)),
             h("span", { class: "place-name", text: item.name }),
             h("span", { class: "place-note", text: note }),
           );
@@ -420,15 +534,18 @@ function renderChooser() {
   );
 }
 
-function renderStory() {
+function renderFinale() {
   const map = currentMap();
   const last = state.mapIndex >= MAPS.length - 1;
+  const timedOut = state.phase === "result";
+  const stars = starsNow();
   return h(
     "div",
     { class: "story-layer" },
     renderConfetti(),
-    h("div", { class: "story-banner", text: `${map.done}！` }),
-    state.storyBeat >= 2
+    h("div", { class: "story-banner", text: timedOut ? "時間到" : `${map.done}！` }),
+    h("div", { class: "star-banner", text: `${starGlyphs(stars)} ${stars}/5` }),
+    state.storyBeat >= 2 || timedOut
       ? h("button", {
           type: "button",
           class: "mega again story-next",
@@ -483,7 +600,7 @@ function renderLane(index, kid) {
   const lane = state.lanes[index] ?? {};
   const active = state.chooser === index;
   const queuedAt = state.queue.indexOf(index);
-  if (state.phase === "story") {
+  if (state.phase === "story" || state.phase === "result") {
     return h(
       "article",
       { class: "lane is-done", "data-lane-panel": String(index) },

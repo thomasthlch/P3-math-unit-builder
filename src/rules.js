@@ -34,14 +34,45 @@ export const MAPS = [
   },
 ];
 
+/** 每件設備要放對 5 次才算建成。 */
+export const BUILD_STEPS = 5;
+
+/**
+ * 星星上限 5。一件設備建滿 5 步得 1 星。
+ * 每關有 6 件，完成 5 件即滿星；第 6 件仍要建完才算過關，但不加第 6 顆星。
+ */
+export const STAR_CAP = 5;
+
+export function emptySteps(facilities) {
+  return Object.fromEntries(facilities.map((item) => [item.id, 0]));
+}
+
+export function completedCount(facilities, steps) {
+  return facilities.filter((item) => (steps[item.id] ?? 0) >= BUILD_STEPS).length;
+}
+
+export function starCount(completed) {
+  return Math.min(STAR_CAP, completed);
+}
+
+/** 只有三個畫面：0 未起、1–4 起緊、5 完成。 */
+export function stageOf(step) {
+  if (step >= BUILD_STEPS) return "done";
+  if (step > 0) return "building";
+  return "empty";
+}
+
 export function isFacilityOpen(index, builtCount) {
   return index < builtCount + 2;
 }
 
-export function openFacilityIds(facilities, built) {
-  return facilities.filter((item, index) => isFacilityOpen(index, built.size) && !built.has(item.id)).map((item) => item.id);
+export function openFacilityIds(facilities, steps) {
+  const done = completedCount(facilities, steps);
+  return facilities
+    .filter((item, index) => isFacilityOpen(index, done) && (steps[item.id] ?? 0) < BUILD_STEPS)
+    .map((item) => item.id);
 }
 
-export function isMapComplete(facilities, built) {
-  return facilities.every((item) => built.has(item.id));
+export function isMapComplete(facilities, steps) {
+  return facilities.every((item) => (steps[item.id] ?? 0) >= BUILD_STEPS);
 }
