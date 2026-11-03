@@ -1,14 +1,7 @@
 import "./style.css";
 import { QUESTIONS } from "./questions.js";
-import {
-  DIRECTIONS,
-  GOAL,
-  MAX,
-  baseTitle,
-  emptyCounts,
-  isWin,
-  unlockedIds,
-} from "./rules.js";
+import { TIME_QUESTIONS } from "./time-questions.js";
+import { MAPS, isFacilityOpen, isMapComplete, openFacilityIds } from "./rules.js";
 
 const KIDS = [
   { label: "1 號", tint: "#ff5a5a" },
@@ -18,7 +11,8 @@ const KIDS = [
 
 const state = {
   phase: "ready",
-  counts: emptyCounts(),
+  mapIndex: 0,
+  built: new Set(),
   deck: [],
   lanes: [{}, {}, {}],
   queue: [],
@@ -27,12 +21,14 @@ const state = {
   pop: null,
   unlockId: null,
   toast: "",
+  storyBeat: 0,
   sound: true,
 };
 
 const wrongTimers = [0, 0, 0];
 let handoffTimer = 0;
 let fxTimer = 0;
+let storyTimer = 0;
 let audioCtx = null;
 let fitObserver = null;
 
@@ -67,16 +63,24 @@ function shuffle(list) {
   return copy;
 }
 
-function dirById(id) {
-  return DIRECTIONS.find((dir) => dir.id === id);
+function currentMap() {
+  return MAPS[state.mapIndex];
+}
+
+function questionBank() {
+  return currentMap().bank === "time" ? TIME_QUESTIONS : QUESTIONS;
+}
+
+function facilityById(id) {
+  return currentMap().facilities.find((item) => item.id === id);
 }
 
 function canBuild(id) {
-  return unlockedIds(state.counts).includes(id) && state.counts[id] < MAX;
+  return openFacilityIds(currentMap().facilities, state.built).includes(id);
 }
 
-function doneCount() {
-  return DIRECTIONS.filter((dir) => state.counts[dir.id] >= GOAL).length;
+function builtCount() {
+  return state.built.size;
 }
 
 function clearTimers() {
@@ -88,11 +92,14 @@ function clearTimers() {
   handoffTimer = 0;
   window.clearTimeout(fxTimer);
   fxTimer = 0;
+  window.clearTimeout(storyTimer);
+  storyTimer = 0;
 }
 
 function refill(exclude) {
-  const pool = QUESTIONS.filter((question) => !exclude.has(question.id));
-  state.deck = shuffle(pool.length ? pool : [...QUESTIONS]);
+  const bank = questionBank();
+  const pool = bank.filter((question) => !exclude.has(question.id));
+  state.deck = shuffle(pool.length ? pool : [...bank]);
 }
 
 function takeQuestion(exclude) {
@@ -101,7 +108,7 @@ function takeQuestion(exclude) {
   for (let index = state.deck.length - 1; index >= 0; index -= 1) {
     if (!exclude.has(state.deck[index].id)) return state.deck.splice(index, 1)[0];
   }
-  return state.deck.pop() ?? QUESTIONS[0];
+  return state.deck.pop() ?? questionBank()[0];
 }
 
 function deal(laneIndex) {
@@ -119,10 +126,11 @@ function deal(laneIndex) {
   };
 }
 
-function startGame() {
+function startGame(mapIndex = 0) {
   clearTimers();
+  state.mapIndex = mapIndex;
   state.phase = "play";
-  state.counts = emptyCounts();
+  state.built = new Set();
   state.deck = [];
   state.queue = [];
   state.chooser = null;
@@ -130,6 +138,7 @@ function startGame() {
   state.pop = null;
   state.unlockId = null;
   state.toast = "";
+  state.storyBeat = 0;
   state.lanes = [{}, {}, {}];
   for (let index = 0; index < KIDS.length; index += 1) deal(index);
   render();
@@ -167,25 +176,32 @@ function onAnswer(laneIndex, choice) {
   }, 2000);
 }
 
-function onPlace(dirId) {
-  if (state.chooser == null || state.phase !== "play" || !canBuild(dirId)) return;
+function onPlace(facilityId) {
+  if (state.chooser == null || state.phase !== "play" || !canBuild(facilityId)) return;
   const laneIndex = state.chooser;
-  const before = unlockedIds(state.counts);
-  state.counts[dirId] += 1;
-  state.pop = { dir: dirId, lane: laneIndex };
-  state.toast = `${KIDS[laneIndex].label} 在「${dirById(dirId).label}」放了一塊！`;
-  const newly = unlockedIds(state.counts).filter((id) => !before.includes(id));
+  const before = openFacilityIds(currentMap().facilities, state.built);
+  state.built.add(facilityId);
+  state.pop = facilityId;
+  const facility = facilityById(facilityId);
+  state.toast = `${KIDS[laneIndex].label} 建好了${facility.name}！`;
+  const newly = openFacilityIds(currentMap().facilities, state.built).filter((id) => !before.includes(id));
   state.unlockId = newly[0] ?? null;
   state.queue.shift();
   state.chooser = null;
   state.holding = true;
-  const won = isWin(state.counts);
+  const won = isMapComplete(currentMap().facilities, state.built);
   if (won) state.lanes[laneIndex].status = "done";
   else deal(laneIndex);
   if (won) {
-    state.phase = "won";
+    state.phase = "story";
+    state.storyBeat = 1;
     state.queue = [];
     playTone("win");
+    window.clearTimeout(storyTimer);
+    storyTimer = window.setTimeout(() => {
+      state.storyBeat = 2;
+      render();
+    }, 900);
   } else if (state.unlockId) playTone("unlock");
   else playTone("place");
   render();
@@ -250,7 +266,7 @@ function render() {
       "div",
       { class: "shell" },
       renderHeader(),
-      h("div", { class: "rule-strip", text: "三人各做各的題。答對就選方向放積木；答錯會換下一題。" }),
+      h("div", { class: "rule-strip", text: "三人各做各的題。答對就選一件設備來建造；答錯會換下一題。" }),
       renderScene(),
       state.phase === "ready" ? renderReady() : renderLanes(),
     ),
@@ -270,10 +286,10 @@ function renderHeader() {
         "div",
         {},
         h("div", { class: "brand-title", text: "長度積木基地" }),
-        h("div", { class: "brand-sub", text: "小三長度單位 · 三人同時" }),
+        h("div", { class: "brand-sub", text: `第 ${currentMap().level} 關 · ${currentMap().title}` }),
       ),
     ),
-    h("div", { class: "progress-pill", text: `方向 ${doneCount()}/6` }),
+    h("div", { class: "progress-pill", text: `設備 ${builtCount()}/${currentMap().facilities.length}` }),
     h(
       "div",
       { class: "tools" },
@@ -295,106 +311,73 @@ function renderHeader() {
 }
 
 function renderScene() {
+  const map = currentMap();
   return h(
     "section",
-    { class: `scene${state.phase === "won" ? " is-won" : ""}`, "aria-label": "建造區" },
+    { class: `scene theme-${map.theme}${state.phase === "story" ? " is-won" : ""}`, "aria-label": "建造區" },
     h(
       "div",
       { class: "sky-deco", "aria-hidden": "true" },
       h("div", { class: "cloud a" }),
       h("div", { class: "cloud b" }),
-      h("div", { class: "sun" }),
+      map.theme === "day" ? h("div", { class: "sun" }) : h("div", { class: "moon" }),
     ),
-    h("div", { class: "scene-name", text: baseTitle(state.counts) }),
-    state.toast && !state.unlockId
+    h("div", { class: "scene-name", text: map.title }),
+    renderChecklist(),
+    state.phase !== "story" && state.toast && !state.unlockId
       ? h("div", { class: "unlock-banner place-toast", text: state.toast })
       : null,
-    state.unlockId
-      ? h("div", { class: "unlock-banner", text: `解鎖新方向：${dirById(state.unlockId).label}！` })
+    state.phase !== "story" && state.unlockId
+      ? h("div", { class: "unlock-banner", text: `解鎖設備：${facilityById(state.unlockId).name}！` })
       : null,
-    h("div", { class: "scene-fit" }, h("div", { class: "plot-sizer" }, h("div", { class: "plot" }, renderPlot()))),
-    state.phase === "won" ? renderWin() : null,
+    h("div", { class: "scene-fit" }, h("div", { class: "plot-sizer" }, h("div", { class: "plot board" }, renderBoard()))),
+    state.phase === "story" ? renderStory() : null,
     state.chooser != null ? renderChooser() : null,
   );
 }
 
-function renderPlot() {
-  return [
-    zone("up", "up-zone", h("div", { class: "vstack" }, bricks("up", { reverse: true }))),
-    h(
-      "div",
-      { class: "land" },
-      h(
-        "div",
-        { class: "ground" },
-        zone("left", "wing", h("div", { class: "row" }, bricks("left", { reverse: true }))),
-        h(
-          "div",
-          { class: "brick filled base" },
-          h("span", { class: "stud" }),
-          h("span", { class: "stud second" }),
-          h("span", { class: "base-name", text: "基地" }),
-        ),
-        zone("right", "wing", h("div", { class: "row" }, bricks("right"))),
-      ),
-      zone("forward", "forward-zone", h("div", { class: "row" }, bricks("forward"))),
-      h(
-        "div",
-        { class: "under" },
-        zone("down", "down-zone", h("div", { class: "row" }, bricks("down"))),
-        zone(
-          "tunnel",
-          "tunnel-zone",
-          h("div", { class: "tunnel-row" }, h("div", { class: "arch", "aria-hidden": "true" }), bricks("tunnel")),
-        ),
-      ),
-    ),
-  ];
-}
-
-function zone(id, className, ...children) {
-  const meta = dirById(id);
-  const open = unlockedIds(state.counts).includes(id);
-  const count = state.counts[id];
-  let caption = `${meta.label} 未開`;
-  if (open && count >= GOAL) caption = `${meta.label} 完成`;
-  else if (open) caption = `${meta.label} ${count}/${GOAL}`;
-  const hot = state.pop?.dir === id;
-  const unlocking = state.unlockId === id;
+function renderChecklist() {
+  const facilities = currentMap().facilities;
   return h(
     "div",
-    { class: `zone ${className}${open ? "" : " is-locked"}${hot ? " is-hot" : ""}${unlocking ? " is-unlock" : ""}` },
-    h("div", { class: `zone-label tone-${id}`, text: caption }),
-    ...children,
-    hot ? renderSparks() : null,
+    { class: "checklist", "aria-label": "設備進度" },
+    h("div", {
+      class: "meter",
+      "aria-hidden": "true",
+    }, h("span", { style: `width:${Math.round((builtCount() / facilities.length) * 100)}%` })),
+    ...facilities.map((item, index) => {
+      const open = isFacilityOpen(index, builtCount());
+      const done = state.built.has(item.id);
+      const mark = done ? "完成" : open ? "可建" : "未開";
+      return h("span", { class: `chip${done ? " is-done" : ""}${open ? "" : " is-locked"}`, text: `${item.name} ${mark}` });
+    }),
   );
 }
 
-function bricks(id, { reverse = false } = {}) {
-  const count = state.counts[id];
-  const total = Math.max(GOAL, count);
-  const slots = [];
-  for (let index = 0; index < total; index += 1) {
-    const filled = index < count;
-    const isNew = filled && state.pop?.dir === id && index === count - 1;
-    slots.push(
-      h(
-        "div",
-        { class: `brick tone-${id} ${filled ? "filled" : "ghost"}${isNew ? " is-new" : ""}` },
-        filled ? h("span", { class: "stud" }) : null,
-        filled ? h("span", { class: "shine" }) : null,
-      ),
+function renderBoard() {
+  return currentMap().facilities.map((item, index) => {
+    const open = isFacilityOpen(index, builtCount());
+    const done = state.built.has(item.id);
+    const fresh = done && state.pop === item.id;
+    return h(
+      "div",
+      {
+        class: `slot${item.wide ? " wide" : ""}${done ? " is-built" : ""}${open ? " is-open" : " is-locked"}${fresh ? " is-new" : ""}`,
+        style: `left:${item.x}%;top:${item.y}%`,
+      },
+      done ? facilityArt(item.art) : h("div", { class: "pad", text: open ? "可建" : "未開" }),
+      h("div", { class: "slot-name", text: item.name }),
     );
-  }
-  if (reverse) slots.reverse();
-  return slots;
+  });
 }
 
-function renderSparks() {
+function facilityArt(art) {
   return h(
-    "span",
-    { class: "sparks", "aria-hidden": "true" },
-    Array.from({ length: 6 }, () => h("i")),
+    "div",
+    { class: `art art-${art}`, "aria-hidden": "true" },
+    h("i"),
+    h("i"),
+    h("i"),
   );
 }
 
@@ -408,29 +391,26 @@ function renderChooser() {
     h(
       "div",
       { class: "chooser", role: "dialog", "aria-label": `${kid.label}選擇建造方向` },
-      h("p", { class: "chooser-title", text: `${kid.label} 答對了！這塊放哪裡？` }),
+      h("p", { class: "chooser-title", text: `${kid.label} 答對了！要建哪一件？` }),
       h(
         "div",
         { class: "chooser-grid" },
-        DIRECTIONS.map((dir) => {
-          const open = unlockedIds(state.counts).includes(dir.id);
-          const count = state.counts[dir.id];
-          const enabled = canBuild(dir.id);
-          let note = "未開";
-          if (!open) note = "未開";
-          else if (count >= MAX) note = "已滿";
-          else if (count >= GOAL) note = "可加建";
-          else note = `${count}/${GOAL}`;
+        currentMap().facilities.map((item, index) => {
+          const open = isFacilityOpen(index, builtCount());
+          const done = state.built.has(item.id);
+          const enabled = open && !done;
+          const note = done ? "已建成" : open ? "可建" : "未開";
           return h(
             "button",
             {
               type: "button",
-              class: `place-btn tone-${dir.id}${enabled ? "" : " is-locked"}`,
+              class: `place-btn art-btn${enabled ? "" : " is-locked"}`,
               "data-action": "place",
-              "data-dir": dir.id,
+              "data-facility": item.id,
               disabled: enabled ? null : true,
             },
-            h("span", { class: "place-name", text: dir.label }),
+            facilityArt(item.art),
+            h("span", { class: "place-name", text: item.name }),
             h("span", { class: "place-note", text: note }),
           );
         }),
@@ -440,19 +420,22 @@ function renderChooser() {
   );
 }
 
-function renderWin() {
+function renderStory() {
+  const map = currentMap();
+  const last = state.mapIndex >= MAPS.length - 1;
   return h(
     "div",
-    { class: "win-layer" },
+    { class: "story-layer" },
     renderConfetti(),
-    h(
-      "div",
-      { class: "win-card", role: "dialog", "aria-label": "完工" },
-      h("p", { class: "eyebrow", text: "完工" }),
-      h("h2", { text: "秘密基地建成了！" }),
-      h("p", { text: "六個方向都有至少 3 塊積木。三人一起完成。" }),
-      h("button", { type: "button", class: "mega again", "data-action": "replay", text: "再玩一次" }),
-    ),
+    h("div", { class: "story-banner", text: `${map.done}！` }),
+    state.storyBeat >= 2
+      ? h("button", {
+          type: "button",
+          class: "mega again story-next",
+          "data-action": last ? "replay" : "next",
+          text: last ? "再玩一次" : "下一關",
+        })
+      : h("p", { class: "story-wait", text: "三人一起建好了！" }),
   );
 }
 
@@ -480,8 +463,8 @@ function renderReady() {
         "ol",
         {},
         h("li", { text: "下面分成三格，每人做自己的題。" }),
-        h("li", { text: "答對後，由你選積木放在哪個方向。" }),
-        h("li", { text: "答錯會換下一題，其他人繼續做。" }),
+      h("li", { text: "答對後，由你選一件設備建上去。" }),
+      h("li", { text: "第 1 關是長度。建成後可以去第 2 關時間。" }),
       ),
     ),
     h("button", { type: "button", class: "mega go", "data-action": "start", text: "開始建造" }),
@@ -500,7 +483,7 @@ function renderLane(index, kid) {
   const lane = state.lanes[index] ?? {};
   const active = state.chooser === index;
   const queuedAt = state.queue.indexOf(index);
-  if (state.phase === "won") {
+  if (state.phase === "story") {
     return h(
       "article",
       { class: "lane is-done", "data-lane-panel": String(index) },
@@ -560,10 +543,10 @@ function renderLaneStatus(index, lane, queuedAt) {
       h("p", { class: "note-hint", text: lane.hint }),
     );
   }
-  const title = state.chooser === index ? "答對了！請在上面選方向" : "答對了，排隊等選位置";
+  const title = state.chooser === index ? "答對了！請在上面選設備" : "答對了，排隊等選位置";
   const detail =
     state.chooser === index
-      ? "點選還沒建滿的方向。"
+        ? "點選還沒建成的設備。"
       : queuedAt > 0
         ? `前面還有 ${queuedAt} 人`
         : "等積木放好就輪到你";
@@ -609,7 +592,11 @@ app.addEventListener("click", (event) => {
   if (!button || !app.contains(button)) return;
   const action = button.dataset.action;
   if (action === "start" || action === "replay") {
-    startGame();
+    startGame(0);
+    return;
+  }
+  if (action === "next") {
+    startGame(state.mapIndex + 1);
     return;
   }
   if (action === "fullscreen") {
@@ -622,7 +609,7 @@ app.addEventListener("click", (event) => {
     return;
   }
   if (action === "place") {
-    onPlace(button.dataset.dir);
+    onPlace(button.dataset.facility);
     return;
   }
   if (button.hasAttribute("data-lane") && button.hasAttribute("data-choice")) {

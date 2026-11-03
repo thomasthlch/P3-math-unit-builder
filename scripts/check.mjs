@@ -1,13 +1,6 @@
 import { QUESTIONS, UNIT_CHOICES } from "../src/questions.js";
-import {
-  DIRECTIONS,
-  GOAL,
-  MAX,
-  UNLOCK_AT,
-  emptyCounts,
-  unlockedIds,
-  isWin,
-} from "../src/rules.js";
+import { TIME_QUESTIONS } from "../src/time-questions.js";
+import { MAPS, isFacilityOpen, isMapComplete, openFacilityIds } from "../src/rules.js";
 
 const G_ANSWERS = {
   G01: "厘米（cm）",
@@ -157,42 +150,78 @@ const english = QUESTIONS.filter((q) => /\b(km|cm|mm|m)\b/.test(q.prompt)).lengt
 if (chinese < 20) fail("中文單位題太少");
 if (english < 20) fail("英文縮寫題太少");
 
-function canBuild(counts, id) {
-  return unlockedIds(counts).includes(id) && counts[id] < MAX;
-}
-
-function play(pick) {
-  const counts = emptyCounts();
-  for (let step = 0; step < 80 && !isWin(counts); step += 1) {
-    const options = DIRECTIONS.filter((dir) => canBuild(counts, dir.id));
-    if (options.length === 0) {
-      fail(`建造卡住：${JSON.stringify(counts)}`);
-      return;
-    }
-    counts[pick(options, counts).id] += 1;
+if (TIME_QUESTIONS.length < 24) fail(`時間題只有 ${TIME_QUESTIONS.length} 題`);
+const timeIds = new Set();
+for (const question of TIME_QUESTIONS) {
+  if (timeIds.has(question.id)) fail(`時間題號重複 ${question.id}`);
+  timeIds.add(question.id);
+  if (!question.choices.includes(question.answer) || new Set(question.choices).size !== 4) {
+    fail(`${question.id} 時間題選項不完整`);
   }
-  if (!isWin(counts)) fail(`未能完工：${JSON.stringify(counts)}`);
+  const expected = expectedTime(question);
+  if (expected != null && question.answer !== expected) {
+    fail(`${question.id} 時間答案應為「${expected}」，實際是「${question.answer}」`);
+  }
 }
 
-play((options) => options[0]);
-play((options) => options[options.length - 1]);
-play((options, counts) =>
-  options.reduce((best, dir) => (counts[dir.id] > counts[best.id] ? dir : best)),
-);
-let seed = 7;
-for (let round = 0; round < 30; round += 1) {
-  play((options) => {
-    seed = (seed * 17 + 3) % 997;
-    return options[seed % options.length];
-  });
+function expectedTime(question) {
+  if (question.type === "H" || question.type === "M") {
+    const match = question.prompt.match(/^(\d+)\s+(\S+)\s+(\d+)\s+(\S+)\s+=\s+______\s+(\S+)$/);
+    if (!match) {
+      fail(`${question.id} 時間題幹不符：${question.prompt}`);
+      return null;
+    }
+    if (!question.hint.includes("×60")) fail(`${question.id} 提示應有 ×60`);
+    return `${Number(match[1]) * 60 + Number(match[3])} ${match[5]}`;
+  }
+  if (question.type === "S" || question.type === "F") {
+    const match = question.prompt.match(/^(\d+)\s+(\S+)\s+=\s+______$/);
+    if (!match) {
+      fail(`${question.id} 時間題幹不符：${question.prompt}`);
+      return null;
+    }
+    if (!question.hint.includes("÷60")) fail(`${question.id} 提示應有 ÷60`);
+    const total = Number(match[1]);
+    const major = Math.floor(total / 60);
+    const minor = total % 60;
+    const majorUnit = question.type === "S" ? (match[2] === "秒" ? "分" : "min") : match[2] === "分" ? "小時" : "h";
+    const minorUnit = question.type === "S" ? (match[2] === "秒" ? "秒" : "s") : match[2] === "分" ? "分" : "min";
+    return `${major} ${majorUnit} ${minor} ${minorUnit}`;
+  }
+  if (question.type === "U") {
+    if (!question.prompt.includes("最適合")) fail(`${question.id} 應問最適合的單位`);
+    return question.answer;
+  }
+  fail(`${question.id} 未知時間題型`);
+  return null;
 }
 
-if (UNLOCK_AT >= GOAL) fail("解鎖門檻應早於完工塊數，學生才有方向可選");
-if (MAX < GOAL) fail("上限不能低於完工所需塊數");
-const sample = emptyCounts();
-sample.up = UNLOCK_AT;
-if (!unlockedIds(sample).includes("forward")) fail("向上達標後應解鎖向前");
-if (unlockedIds(sample).includes("left")) fail("不應一次跳過中間方向");
+if (MAPS.length !== 2) fail("應有兩關");
+for (const map of MAPS) {
+  if (map.facilities.length < 6) fail(`${map.title} 設備太少`);
+  const names = new Set(map.facilities.map((item) => item.name));
+  if (names.size !== map.facilities.length) fail(`${map.title} 設備名稱重複`);
+  if (!isFacilityOpen(0, 0) || !isFacilityOpen(1, 0) || isFacilityOpen(2, 0)) {
+    fail(`${map.title} 開局應只打開前兩項`);
+  }
+  if (!isFacilityOpen(2, 1)) fail(`${map.title} 建成 1 項後應打開第 3 項`);
+
+  function play(pick) {
+    const built = new Set();
+    for (let step = 0; step < 20 && !isMapComplete(map.facilities, built); step += 1) {
+      const options = map.facilities.filter((item, index) => isFacilityOpen(index, built.size) && !built.has(item.id));
+      if (options.length === 0) {
+        fail(`${map.title} 建造卡住`);
+        return;
+      }
+      built.add(pick(options).id);
+    }
+    if (!isMapComplete(map.facilities, built)) fail(`${map.title} 未能完工`);
+    if (openFacilityIds(map.facilities, built).length !== 0) fail(`${map.title} 完工後仍有空位`);
+  }
+  play((options) => options[0]);
+  play((options) => options[options.length - 1]);
+}
 
 if (errors.length) {
   console.error(errors.join("\n"));
@@ -200,7 +229,8 @@ if (errors.length) {
 }
 
 console.log(
-  `題庫 ${QUESTIONS.length} 題`,
+  `長度題 ${QUESTIONS.length} 題`,
   counts,
   `中文單位題幹 ${chinese}，英文縮寫題幹 ${english}`,
+  `；時間題 ${TIME_QUESTIONS.length} 題`,
 );
