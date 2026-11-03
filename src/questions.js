@@ -157,6 +157,10 @@ export const QUESTIONS = [
   makeA("A08", 3, 7, "km", "m", "米"),
   makeA("A09", 4, 9, "公里", "m", "m"),
   makeA("A10", 2, 1, "km", "米", "米"),
+  makeA("A11", 6, 2, "km", "m", "m"),
+  makeA("A12", 3, 8, "公里", "米", "米"),
+  makeA("A13", 5, 4, "km", "m", "米"),
+  makeA("A14", 1, 9, "公里", "米", "米"),
 
   makeB("B01", 2, 3, "厘米", "毫米", "毫米"),
   makeB("B02", 3, 4, "cm", "mm", "mm"),
@@ -168,6 +172,10 @@ export const QUESTIONS = [
   makeB("B08", 1, 7, "cm", "mm", "毫米"),
   makeB("B09", 4, 5, "厘米", "mm", "mm"),
   makeB("B10", 2, 9, "cm", "毫米", "毫米"),
+  makeB("B11", 6, 2, "厘米", "毫米", "毫米"),
+  makeB("B12", 3, 8, "cm", "mm", "mm"),
+  makeB("B13", 5, 4, "厘米", "mm", "毫米"),
+  makeB("B14", 6, 7, "cm", "毫米", "mm"),
 
   makeC("C01", 23, "毫米"),
   makeC("C02", 35, "mm"),
@@ -177,6 +185,9 @@ export const QUESTIONS = [
   makeC("C06", 51, "mm"),
   makeC("C07", 16, "毫米"),
   makeC("C08", 39, "mm"),
+  makeC("C09", 14, "毫米"),
+  makeC("C10", 47, "mm"),
+  makeC("C11", 19, "毫米"),
 
   makeD("D01", 2003, "米"),
   makeD("D02", 1004, "m"),
@@ -186,6 +197,9 @@ export const QUESTIONS = [
   makeD("D06", 1006, "m"),
   makeD("D07", 2009, "米"),
   makeD("D08", 3001, "m"),
+  makeD("D09", 6003, "米"),
+  makeD("D10", 1007, "m"),
+  makeD("D11", 4006, "米"),
 
   makeE("E01", 2, 3, "米", "厘米", "厘米"),
   makeE("E02", 1, 4, "m", "cm", "cm"),
@@ -195,6 +209,9 @@ export const QUESTIONS = [
   makeE("E06", 4, 1, "m", "厘米", "cm"),
   makeE("E07", 3, 2, "米", "厘米", "厘米"),
   makeE("E08", 2, 7, "m", "cm", "cm"),
+  makeE("E09", 5, 2, "米", "厘米", "厘米"),
+  makeE("E10", 3, 8, "m", "cm", "cm"),
+  makeE("E11", 4, 6, "米", "厘米", "厘米"),
 
   makeF("F01", 203, "厘米"),
   makeF("F02", 104, "cm"),
@@ -204,6 +221,9 @@ export const QUESTIONS = [
   makeF("F06", 206, "cm"),
   makeF("F07", 301, "厘米"),
   makeF("F08", 109, "cm"),
+  makeF("F09", 503, "厘米"),
+  makeF("F10", 207, "cm"),
+  makeF("F11", 406, "厘米"),
 
   makeG(
     "G01",

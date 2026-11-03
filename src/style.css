@@ -113,6 +113,7 @@ button:focus-visible {
 .timer.is-urgent { background: #ffb4a8; }
 
 .tools { display: flex; gap: 8px; }
+.tools.is-end { margin-left: auto; }
 
 .tool {
   min-height: 46px;
@@ -149,6 +150,18 @@ button:focus-visible {
 
 .theme-dusk {
   background: linear-gradient(#241b4a 0 48%, #3a2d6b 48% 100%);
+}
+
+.theme-desert {
+  background: linear-gradient(#ffd9a0 0 46%, #f0b56a 46% 100%);
+}
+
+.theme-space {
+  background: linear-gradient(#1b1244 0 48%, #2a1b5e 48% 100%);
+}
+
+.theme-water {
+  background: linear-gradient(#b8ecff 0 42%, #5fd4f0 42% 100%);
 }
 
 .moon {
@@ -233,6 +246,21 @@ button:focus-visible {
   background-image: radial-gradient(circle at 12px 12px, rgba(255, 255, 255, 0.18) 0 4px, transparent 5px);
 }
 
+.theme-desert .board {
+  background-color: #e7b45a;
+  background-image: radial-gradient(circle at 12px 12px, rgba(255, 255, 255, 0.28) 0 5px, transparent 6px);
+}
+
+.theme-space .board {
+  background-color: #3a2d78;
+  background-image: radial-gradient(circle at 12px 12px, rgba(255, 255, 255, 0.16) 0 4px, transparent 5px);
+}
+
+.theme-water .board {
+  background-color: #3ec6ea;
+  background-image: radial-gradient(circle at 12px 12px, rgba(255, 255, 255, 0.35) 0 5px, transparent 6px);
+}
+
 .slot {
   position: absolute;
   width: 92px;
@@ -269,6 +297,13 @@ button:focus-visible {
 }
 
 .art { position: relative; width: 64px; height: 46px; }
+
+.art-emoji {
+  display: grid;
+  place-items: center;
+  font-size: 2.1rem;
+  line-height: 1;
+}
 .art i { position: absolute; display: block; border: 3px solid var(--ink); box-sizing: border-box; }
 .slot.wide .art { width: 148px; }
 
@@ -376,15 +411,26 @@ button:focus-visible {
 
 .story-wait { bottom: 12px; background: #fff; border: 3px solid var(--ink); border-radius: 999px; padding: 6px 12px; }
 
-.story-next {
+.finale-actions {
   pointer-events: auto;
   position: absolute;
   left: 50%;
   bottom: 10px;
   transform: translateX(-50%);
-  width: min(280px, 70%);
   z-index: 2;
+  display: flex;
+  gap: 8px;
+  width: min(560px, 94%);
 }
+
+.finale-actions .mega {
+  position: static;
+  width: auto;
+  flex: 1;
+  min-height: 56px;
+}
+
+.mega.story-back { background: #fff; }
 
 .sky-deco { position: absolute; inset: 0; pointer-events: none; }
 
@@ -398,6 +444,16 @@ button:focus-visible {
   border: 3px solid var(--ink);
   border-radius: 12px;
   box-shadow: 3px 3px 0 var(--ink);
+}
+
+.stars {
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(circle, #fff 1.5px, transparent 1.7px),
+    radial-gradient(circle, #ffe14a 1.2px, transparent 1.5px);
+  background-size: 84px 62px, 120px 92px;
+  background-position: 16px 18px, 48px 40px;
 }
 
 .cloud {
@@ -445,6 +501,11 @@ button:focus-visible {
   align-items: center;
   justify-content: center;
   z-index: 1;
+}
+
+.scene:has(.story-layer) .scene-fit {
+  align-items: flex-start;
+  padding-bottom: 84px;
 }
 
 .plot-sizer { overflow: hidden; }
@@ -741,12 +802,14 @@ button:focus-visible {
   to { transform: translateY(105%) rotate(160deg); }
 }
 
-.ready, .lanes { flex: 0.9; min-height: 0; }
+.lanes { flex: 0.9; min-height: 0; }
 
-.ready {
+.map-select {
+  flex: 1;
+  min-height: 0;
   display: grid;
-  grid-template-columns: 1.4fr 0.8fr;
-  gap: 10px;
+  grid-template-columns: minmax(220px, 0.85fr) minmax(280px, 1.25fr);
+  gap: 12px;
   background: var(--cream);
   border: 4px solid var(--ink);
   border-radius: 18px;
@@ -754,9 +817,43 @@ button:focus-visible {
   padding: 12px 14px;
 }
 
-.ready h1 { margin: 4px 0 8px; font-size: clamp(1.6rem, 2.6vw, 2.2rem); }
-.ready ol { margin: 0; padding-left: 1.2rem; font-weight: 800; font-size: clamp(1rem, 1.5vw, 1.2rem); display: flex; flex-direction: column; gap: 6px; }
+.map-select h1 { margin: 4px 0 8px; font-size: clamp(1.6rem, 2.6vw, 2.2rem); }
+.map-select ol { margin: 0; padding-left: 1.2rem; font-weight: 800; font-size: clamp(1rem, 1.5vw, 1.2rem); display: flex; flex-direction: column; gap: 6px; }
 .eyebrow { display: inline-block; margin: 0; border-radius: 999px; padding: 2px 8px; background: var(--yellow); }
+
+.map-grid {
+  display: grid;
+  grid-template-rows: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  min-height: 0;
+}
+
+.map-card {
+  min-height: 56px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border: 4px solid var(--ink);
+  border-radius: 16px;
+  box-shadow: 0 4px 0 var(--ink);
+  background: #fff;
+  text-align: left;
+  font-weight: 900;
+}
+
+.map-card:active { transform: translateY(3px); box-shadow: 0 1px 0 var(--ink); }
+.map-card.theme-day { background: #e5f6ff; }
+.map-card.theme-dusk { background: #efe6ff; }
+.map-card.theme-desert { background: #ffe8c4; }
+.map-card.theme-space { background: #e4e0ff; }
+.map-card.theme-water { background: #d9f7ff; }
+.map-mark { font-size: 1.8rem; line-height: 1; }
+.map-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.map-level { font-size: 0.85rem; }
+.map-title { font-size: clamp(1.15rem, 1.8vw, 1.5rem); }
+.map-count { margin-left: auto; font-size: 0.95rem; white-space: nowrap; }
 
 .mega {
   min-height: 88px;
@@ -871,9 +968,53 @@ button:focus-visible {
 .note-hint { margin: 0; font-size: clamp(0.92rem, 1.2vw, 1.05rem); line-height: 1.35; }
 .lane-note p { margin: 0; }
 
+.lane-pick {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+}
+
+.lane-pick .note-title { text-align: center; }
+
+.lane-places {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  align-content: start;
+  overflow: auto;
+}
+
+.lane-place {
+  min-height: 48px;
+  border: 3px solid var(--ink);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 3px 0 var(--ink);
+  font-weight: 900;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 2px 4px;
+  line-height: 1.15;
+}
+
+.lane-place.is-locked { background: #ececec; }
+.lane-place:active:not(:disabled) { transform: translateY(2px); box-shadow: 0 1px 0 var(--ink); }
+.lane-place .place-name { font-size: clamp(0.85rem, 1.1vw, 1rem); }
+.lane-place .place-note { font-size: 0.75rem; font-weight: 800; }
+
 @media (max-height: 760px) {
   .shell { gap: 6px; padding: 6px; }
-  .ready h1 { font-size: 1.4rem; }
+  .map-select h1 { font-size: 1.4rem; }
+  .map-mark { font-size: 1.4rem; }
+  .lane-place { min-height: 42px; }
   .mega { min-height: 72px; }
   .place-btn { min-height: 60px; }
 }

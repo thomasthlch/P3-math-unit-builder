@@ -150,7 +150,7 @@ function expectedAnswer(question) {
   return null;
 }
 
-if (QUESTIONS.length < 60) fail(`題目只有 ${QUESTIONS.length} 題，少於 60`);
+if (QUESTIONS.length < 80) fail(`長度題只有 ${QUESTIONS.length} 題，少於 80`);
 for (const type of ["A", "B", "C", "D", "E", "F", "G"]) {
   if (!counts[type]) fail(`缺少題型 ${type}`);
 }
@@ -160,7 +160,7 @@ const english = QUESTIONS.filter((q) => /\b(km|cm|mm|m)\b/.test(q.prompt)).lengt
 if (chinese < 20) fail("中文單位題太少");
 if (english < 20) fail("英文縮寫題太少");
 
-if (TIME_QUESTIONS.length < 24) fail(`時間題只有 ${TIME_QUESTIONS.length} 題`);
+if (TIME_QUESTIONS.length < 45) fail(`時間題只有 ${TIME_QUESTIONS.length} 題，少於 45`);
 const timeIds = new Set();
 for (const question of TIME_QUESTIONS) {
   if (timeIds.has(question.id)) fail(`時間題號重複 ${question.id}`);
@@ -206,11 +206,44 @@ function expectedTime(question) {
   return null;
 }
 
-if (MAPS.length !== 2) fail("應有兩關");
-for (const map of MAPS) {
-  if (map.facilities.length < 6) fail(`${map.title} 設備太少`);
+const sharedIds = new Set();
+for (const question of [...QUESTIONS, ...TIME_QUESTIONS]) {
+  if (sharedIds.has(question.id)) fail(`共用題庫題號重複 ${question.id}`);
+  sharedIds.add(question.id);
+}
+if (QUESTIONS.length + TIME_QUESTIONS.length < 100) {
+  fail(`共用題庫只有 ${QUESTIONS.length + TIME_QUESTIONS.length} 題，少於 100`);
+}
+
+if (starCount(4, 5) !== 5) fail("5 件完成 4 件應滿星");
+if (starCount(3, 5) >= 5) fail("5 件完成 3 件不應滿星");
+if (starCount(5, 6) !== 5 || starCount(4, 6) !== 4 || starCount(2, 6) !== 2) {
+  fail("6 件關卡應維持完成 5 件滿星、之前按件數給星");
+}
+if (starCount(6, 7) !== 5) fail("7 件完成 6 件應滿星");
+if (starCount(5, 7) >= 5) fail("7 件完成 5 件不應滿星");
+if (starCount(1, 5) !== 1 || starCount(1, 6) !== 1 || starCount(1, 7) !== 1) {
+  fail("完成 1 件應有 1 星");
+}
+
+const facilityCounts = [5, 5, 6, 7, 7];
+if (MAPS.length !== facilityCounts.length) fail(`應有 ${facilityCounts.length} 關`);
+const themes = new Set();
+const titles = new Set();
+for (const [index, map] of MAPS.entries()) {
+  if (map.level !== index + 1) fail(`${map.title} 關卡編號應為 ${index + 1}`);
+  if (map.facilities.length !== facilityCounts[index]) {
+    fail(`${map.title} 應有 ${facilityCounts[index]} 件設備，實際 ${map.facilities.length}`);
+  }
+  if (!map.theme || !map.done || !map.title) fail(`第 ${map.level} 關缺少主題資料`);
+  if (themes.has(map.theme)) fail(`主題重複 ${map.theme}`);
+  themes.add(map.theme);
+  if (titles.has(map.title)) fail(`關卡名稱重複 ${map.title}`);
+  titles.add(map.title);
   const names = new Set(map.facilities.map((item) => item.name));
+  const facilityIds = new Set(map.facilities.map((item) => item.id));
   if (names.size !== map.facilities.length) fail(`${map.title} 設備名稱重複`);
+  if (facilityIds.size !== map.facilities.length) fail(`${map.title} 設備編號重複`);
   if (!isFacilityOpen(0, 0) || !isFacilityOpen(1, 0) || isFacilityOpen(2, 0)) {
     fail(`${map.title} 開局應只打開前兩項`);
   }
@@ -219,12 +252,14 @@ for (const map of MAPS) {
   if (stageOf(0) !== "empty" || stageOf(3) !== "building" || stageOf(BUILD_STEPS) !== "done") {
     fail("設備應只有未起、起緊、完成三個畫面");
   }
+  const count = map.facilities.length;
   const partial = emptySteps(map.facilities);
   partial[map.facilities[0].id] = BUILD_STEPS;
   partial[map.facilities[1].id] = BUILD_STEPS - 1;
-  if (starCount(completedCount(map.facilities, partial)) !== 1) {
+  if (starCount(completedCount(map.facilities, partial), count) !== 1) {
     fail(`${map.title} 未建滿 5 步不應計星`);
   }
+  if (starCount(count - 1, count) !== 5) fail(`${map.title} 完成 ${count - 1} 件應滿星`);
 
   function play(pick) {
     const steps = emptySteps(map.facilities);
@@ -239,7 +274,9 @@ for (const map of MAPS) {
     }
     if (!isMapComplete(map.facilities, steps)) fail(`${map.title} 未能完工`);
     if (openFacilityIds(map.facilities, steps).length !== 0) fail(`${map.title} 完工後仍有空位`);
-    if (starCount(completedCount(map.facilities, steps)) !== 5) fail(`${map.title} 六件完成應顯示 5 星`);
+    if (starCount(completedCount(map.facilities, steps), count) !== 5) {
+      fail(`${map.title} 全部完成應顯示 5 星`);
+    }
   }
   play((options) => options[0]);
   play((options) => options[options.length - 1]);
