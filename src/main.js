@@ -79,7 +79,7 @@ function currentMap() {
 }
 
 function questionBank() {
-  return currentMap().bank === "time" ? TIME_QUESTIONS : QUESTIONS;
+  return QUESTIONS.concat(TIME_QUESTIONS);
 }
 
 function facilityById(id) {
@@ -95,7 +95,7 @@ function doneFacilities() {
 }
 
 function starsNow() {
-  return starCount(doneFacilities());
+  return starCount(doneFacilities(), currentMap().facilities.length);
 }
 
 function starGlyphs(count) {
@@ -136,23 +136,29 @@ function startClock() {
   }, 1000);
 }
 
-function lanesPicking() {
-  return state.lanes.some((lane) => lane.status === "pick");
-}
-
 function onTimeUp() {
   if (state.phase !== "play") return;
   window.clearInterval(clockTimer);
   clockTimer = 0;
   state.secondsLeft = 0;
-  state.finishAfterPlace = true;
-  if (lanesPicking()) return;
+  wrongTimers.forEach((timer, index) => {
+    window.clearTimeout(timer);
+    wrongTimers[index] = 0;
+  });
+  if (state.lanes.some((lane) => lane.status === "pick")) {
+    state.finishAfterPlace = true;
+    render();
+    return;
+  }
   enterResult();
 }
 
 function enterResult() {
   state.phase = "result";
   state.finishAfterPlace = false;
+  state.pop = null;
+  state.unlockId = null;
+  state.toast = "";
   playTone("win");
   render();
 }
@@ -205,6 +211,18 @@ function startGame(mapIndex = 0) {
   startClock();
 }
 
+function showMenu() {
+  clearTimers();
+  state.phase = "ready";
+  state.finishAfterPlace = false;
+  state.pop = null;
+  state.unlockId = null;
+  state.toast = "";
+  state.storyBeat = 0;
+  state.lanes = [{}, {}, {}];
+  render();
+}
+
 function onAnswer(laneIndex, choice) {
   const lane = state.lanes[laneIndex];
   if (state.phase !== "play" || state.finishAfterPlace || !lane || lane.status !== "ask") return;
@@ -246,24 +264,30 @@ function onPlace(laneIndex, facilityId) {
     : [];
   state.unlockId = newly[0] ?? null;
   const won = isMapComplete(currentMap().facilities, state.steps);
-  if (won) state.lanes[laneIndex].status = "done";
-  else deal(laneIndex);
   if (won) {
     window.clearInterval(clockTimer);
     state.phase = "story";
     state.storyBeat = 1;
     state.finishAfterPlace = false;
+    state.lanes[laneIndex].status = "done";
     playTone("win");
     window.clearTimeout(storyTimer);
     storyTimer = window.setTimeout(() => {
       state.storyBeat = 2;
       render();
     }, 900);
-  } else if (state.unlockId) playTone("unlock");
-  else playTone("place");
-  if (!won && state.finishAfterPlace && !lanesPicking()) {
-    enterResult();
-    return;
+  } else if (state.finishAfterPlace) {
+    state.lanes[laneIndex].status = "done";
+    if (!state.lanes.some((item) => item.status === "pick")) {
+      enterResult();
+      return;
+    }
+    if (state.unlockId) playTone("unlock");
+    else playTone("place");
+  } else {
+    deal(laneIndex);
+    if (state.unlockId) playTone("unlock");
+    else playTone("place");
   }
   render();
   window.clearTimeout(fxTimer);
@@ -271,7 +295,7 @@ function onPlace(laneIndex, facilityId) {
     state.pop = null;
     state.unlockId = null;
     state.toast = "";
-    render();
+    if (state.phase === "play" || state.phase === "story") render();
   }, won || state.unlockId ? 2200 : 1600);
 }
 
@@ -316,20 +340,24 @@ function toggleFullscreen() {
 
 function render() {
   app.className = `phase-${state.phase}`;
+  if (state.phase === "ready") {
+    app.replaceChildren(h("div", { class: "shell" }, renderHeader(true), renderMapSelect()));
+    return;
+  }
   app.replaceChildren(
     h(
       "div",
       { class: "shell" },
-      renderHeader(),
-      h("div", { class: "rule-strip", text: "三人各做各的題。答對就選一件設備來建造；答錯會換下一題。" }),
+      renderHeader(false),
+      h("div", { class: "rule-strip", text: "三人各做各的題。答對就在自己的格子選設備；答錯會換下一題。" }),
       renderScene(),
-      state.phase === "ready" ? renderReady() : renderLanes(),
+      renderLanes(),
     ),
   );
   watchFit();
 }
 
-function renderHeader() {
+function renderHeader(selecting) {
   return h(
     "header",
     { class: "header" },
@@ -341,18 +369,23 @@ function renderHeader() {
         "div",
         {},
         h("div", { class: "brand-title", text: "長度積木基地" }),
-        h("div", { class: "brand-sub", text: `第 ${currentMap().level} 關 · ${currentMap().title}` }),
+        h("div", {
+          class: "brand-sub",
+          text: selecting ? "五關都可以選" : `第 ${currentMap().level} 關 · ${currentMap().title}`,
+        }),
       ),
     ),
-    h("div", {
-      class: `timer${state.secondsLeft <= 10 ? " is-urgent" : ""}`,
-      "data-timer": "1",
-      text: formatTime(state.secondsLeft),
-    }),
-    h("div", { class: "progress-pill", text: `${starGlyphs(starsNow())} ${starsNow()}/5` }),
+    selecting
+      ? null
+      : h("div", {
+          class: `timer${state.secondsLeft <= 10 ? " is-urgent" : ""}`,
+          "data-timer": "1",
+          text: formatTime(state.secondsLeft),
+        }),
+    selecting ? null : h("div", { class: "progress-pill", text: `${starGlyphs(starsNow())} ${starsNow()}/5` }),
     h(
       "div",
-      { class: "tools" },
+      { class: selecting ? "tools is-end" : "tools" },
       h("button", {
         type: "button",
         class: "tool",
@@ -375,13 +408,7 @@ function renderScene() {
   return h(
     "section",
     { class: `scene theme-${map.theme}${state.phase === "story" ? " is-won" : ""}`, "aria-label": "建造區" },
-    h(
-      "div",
-      { class: "sky-deco", "aria-hidden": "true" },
-      h("div", { class: "cloud a" }),
-      h("div", { class: "cloud b" }),
-      map.theme === "day" ? h("div", { class: "sun" }) : h("div", { class: "moon" }),
-    ),
+    renderSky(map),
     h("div", { class: "scene-name", text: map.title }),
     renderChecklist(),
     state.phase !== "story" && state.toast && !state.unlockId
@@ -392,6 +419,18 @@ function renderScene() {
       : null,
     h("div", { class: "scene-fit" }, h("div", { class: "plot-sizer" }, h("div", { class: "plot board" }, renderBoard()))),
     state.phase === "story" || state.phase === "result" ? renderFinale() : null,
+  );
+}
+
+function renderSky(map) {
+  const body =
+    map.sky === "moon" ? h("div", { class: "moon" }) : map.sky === "stars" ? h("div", { class: "stars" }) : h("div", { class: "sun" });
+  return h(
+    "div",
+    { class: "sky-deco", "aria-hidden": "true" },
+    map.sky === "stars" ? null : h("div", { class: "cloud a" }),
+    map.sky === "stars" ? null : h("div", { class: "cloud b" }),
+    body,
   );
 }
 
@@ -442,7 +481,7 @@ function renderBoard() {
       },
       stage === "empty"
         ? h("div", { class: "pad", text: open ? "未起" : "未開" })
-        : facilityArt(item.art, stage),
+        : facilityArt(item, stage),
       renderPips(step),
       h("div", { class: "slot-name", text: `${item.name} ${chipMark(step, open)}` }),
     );
@@ -457,10 +496,13 @@ function renderPips(step) {
   );
 }
 
-function facilityArt(art, stage = "done") {
+function facilityArt(item, stage = "done") {
+  if (item.emoji) {
+    return h("div", { class: `art art-emoji is-${stage}`, "aria-hidden": "true", text: item.emoji });
+  }
   return h(
     "div",
-    { class: `art art-${art} is-${stage}`, "aria-hidden": "true" },
+    { class: `art art-${item.art} is-${stage}`, "aria-hidden": "true" },
     h("i"),
     h("i"),
     h("i"),
@@ -469,22 +511,35 @@ function facilityArt(art, stage = "done") {
 
 function renderFinale() {
   const map = currentMap();
-  const last = state.mapIndex >= MAPS.length - 1;
+  const hasNext = state.mapIndex + 1 < MAPS.length;
   const timedOut = state.phase === "result";
   const stars = starsNow();
+  const showActions = state.storyBeat >= 2 || timedOut;
   return h(
     "div",
     { class: "story-layer" },
     renderConfetti(),
     h("div", { class: "story-banner", text: timedOut ? "時間到" : `${map.done}！` }),
     h("div", { class: "star-banner", text: `${starGlyphs(stars)} ${stars}/5` }),
-    state.storyBeat >= 2 || timedOut
-      ? h("button", {
-          type: "button",
-          class: "mega again story-next",
-          "data-action": last ? "replay" : "next",
-          text: last ? "再玩一次" : "下一關",
-        })
+    showActions
+      ? h(
+          "div",
+          { class: "finale-actions" },
+          h("button", {
+            type: "button",
+            class: "mega story-back",
+            "data-action": "menu",
+            text: "返回選關",
+          }),
+          hasNext
+            ? h("button", {
+                type: "button",
+                class: "mega again",
+                "data-action": "next",
+                text: "下一關",
+              })
+            : null,
+        )
       : h("p", { class: "story-wait", text: "三人一起建好了！" }),
   );
 }
@@ -502,22 +557,46 @@ function renderConfetti() {
   );
 }
 
-function renderReady() {
+function renderMapSelect() {
   return h(
     "section",
-    { class: "ready" },
-    h("div", { class: "ready-copy" },
+    { class: "map-select" },
+    h(
+      "div",
+      { class: "ready-copy" },
       h("p", { class: "eyebrow", text: "電子白板合作" }),
-      h("h1", { text: "三人一起建造" }),
+      h("h1", { text: "選一關開始" }),
       h(
         "ol",
         {},
-        h("li", { text: "下面分成三格，每人做自己的題。" }),
-      h("li", { text: "答對後，在自己這一格選要建的設備。" }),
-      h("li", { text: "第 1 關是長度。建成後可以去第 2 關時間。" }),
+        h("li", { text: "五關都可以直接開始，不用解鎖。" }),
+        h("li", { text: "三人各做各的題。答對就在自己的格子選設備。" }),
+        h("li", { text: "每關約 60 秒。時間到會按建成的設備給星星。" }),
       ),
     ),
-    h("button", { type: "button", class: "mega go", "data-action": "start", text: "開始建造" }),
+    h(
+      "div",
+      { class: "map-grid" },
+      MAPS.map((map, index) =>
+        h(
+          "button",
+          {
+            type: "button",
+            class: `map-card theme-${map.theme}`,
+            "data-action": "start",
+            "data-map": String(index),
+          },
+          h("span", { class: "map-mark", "aria-hidden": "true", text: map.mark }),
+          h(
+            "span",
+            { class: "map-copy" },
+            h("span", { class: "map-level", text: `第 ${map.level} 關` }),
+            h("span", { class: "map-title", text: map.title }),
+          ),
+          h("span", { class: "map-count", text: `${map.facilities.length} 件` }),
+        ),
+      ),
+    ),
   );
 }
 
@@ -559,11 +638,64 @@ function renderLane(index, kid) {
         ? h("span", { class: "type-badge", text: lane.question.typeLabel })
         : null,
     ),
-    lane.status === "ask"
-      ? renderAsk(index, lane)
-      : lane.status === "pick"
-        ? renderLanePick(index)
-        : renderLaneStatus(index, lane),
+    laneBody(index, lane),
+  );
+}
+
+function laneBody(index, lane) {
+  if (state.finishAfterPlace && lane.status !== "pick") {
+    return h(
+      "div",
+      { class: "lane-note wait", role: "status" },
+      h("p", { class: "note-title", text: "時間到" }),
+    );
+  }
+  if (lane.status === "ask") return renderAsk(index, lane);
+  if (lane.status === "pick") return renderPick(index);
+  if (lane.status === "wrong") {
+    return h(
+      "div",
+      { class: "lane-note bad", role: "status" },
+      h("p", { class: "note-title", text: "再想一想，即將換下一題" }),
+      h("p", { class: "note-hint", text: lane.hint }),
+    );
+  }
+  return h(
+    "div",
+    { class: "lane-note wait", role: "status" },
+    h("p", { class: "note-title", text: "等下一題" }),
+  );
+}
+
+function renderPick(laneIndex) {
+  const done = doneFacilities();
+  return h(
+    "div",
+    { class: "lane-pick" },
+    h("p", { class: "note-title", text: "答對了！建哪一件？" }),
+    h(
+      "div",
+      { class: "lane-places" },
+      currentMap().facilities.map((item, index) => {
+        const open = isFacilityOpen(index, done);
+        const step = stepOf(item.id);
+        const enabled = open && step < BUILD_STEPS;
+        const label = item.emoji ? `${item.emoji} ${item.name}` : item.name;
+        return h(
+          "button",
+          {
+            type: "button",
+            class: `lane-place${enabled ? "" : " is-locked"}`,
+            "data-action": "place",
+            "data-lane": String(laneIndex),
+            "data-facility": item.id,
+            disabled: enabled ? null : true,
+          },
+          h("span", { class: "place-name", text: label }),
+          h("span", { class: "place-note", text: chipMark(step, open) }),
+        );
+      }),
+    ),
   );
 }
 
@@ -586,40 +718,6 @@ function renderAsk(index, lane) {
   ];
 }
 
-function renderLanePick(index) {
-  return h(
-    "div",
-    { class: "lane-picks", role: "group", "aria-label": `${KIDS[index].label}選設備` },
-    currentMap().facilities.map((item, facilityIndex) => {
-      const open = isFacilityOpen(facilityIndex, doneFacilities());
-      const step = stepOf(item.id);
-      const enabled = open && step < BUILD_STEPS;
-      return h(
-        "button",
-        {
-          type: "button",
-          class: `lane-pick${enabled ? "" : " is-locked"}`,
-          "data-action": "place",
-          "data-lane": String(index),
-          "data-facility": item.id,
-          disabled: enabled ? null : true,
-        },
-        h("span", { class: "place-name", text: item.name }),
-        h("span", { class: "place-note", text: chipMark(step, open) }),
-      );
-    }),
-  );
-}
-
-function renderLaneStatus(index, lane) {
-  return h(
-    "div",
-    { class: "lane-note bad", role: "status" },
-    h("p", { class: "note-title", text: "再想一想，即將換下一題" }),
-    h("p", { class: "note-hint", text: lane.hint }),
-  );
-}
-
 function fitPlot() {
   const wrap = document.querySelector(".scene-fit");
   const sizer = document.querySelector(".plot-sizer");
@@ -630,8 +728,9 @@ function fitPlot() {
   sizer.style.height = "auto";
   const width = Math.max(plot.offsetWidth, plot.scrollWidth);
   const height = Math.max(plot.offsetHeight, plot.scrollHeight);
-  const availW = wrap.clientWidth;
-  const availH = wrap.clientHeight;
+  const pad = getComputedStyle(wrap);
+  const availW = wrap.clientWidth - parseFloat(pad.paddingLeft) - parseFloat(pad.paddingRight);
+  const availH = wrap.clientHeight - parseFloat(pad.paddingTop) - parseFloat(pad.paddingBottom);
   if (!width || !height || !availW || !availH) return;
   const scale = Math.min(1.65, (availW - 24) / width, (availH - 12) / height);
   sizer.style.width = `${Math.floor(width * scale)}px`;
@@ -653,12 +752,18 @@ app.addEventListener("click", (event) => {
   const button = event.target.closest("button");
   if (!button || !app.contains(button)) return;
   const action = button.dataset.action;
-  if (action === "start" || action === "replay") {
-    startGame(0);
+  if (action === "start") {
+    const index = Number(button.dataset.map);
+    if (!Number.isInteger(index) || !MAPS[index]) return;
+    startGame(index);
+    return;
+  }
+  if (action === "menu") {
+    showMenu();
     return;
   }
   if (action === "next") {
-    startGame(state.mapIndex + 1);
+    if (state.mapIndex + 1 < MAPS.length) startGame(state.mapIndex + 1);
     return;
   }
   if (action === "fullscreen") {
